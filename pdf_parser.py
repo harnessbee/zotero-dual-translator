@@ -108,6 +108,19 @@ def _extract_missing_pages_with_docling(pdf_path: str, pages: list[int]) -> list
         else:
             width, height = fallback_sizes.get(page_no, (1.0, 1.0))
 
+        # Collect container bboxes first so we can suppress text items that lie within them.
+        container_bboxes: list[tuple[float, float, float, float]] = []
+        for item, _level in doc.iterate_items(
+            page_no=page_no,
+            with_groups=False,
+            traverse_pictures=True,
+            included_content_layers=set(ContentLayer),
+        ):
+            if isinstance(item, (PictureItem, TableItem)):
+                cbbox = _provenance_bbox(item, page_no, height)
+                if cbbox is not None:
+                    container_bboxes.append(cbbox)
+
         blocks: list[LayoutBlock] = []
         reading_order = 0
         for item, _level in doc.iterate_items(
@@ -116,6 +129,14 @@ def _extract_missing_pages_with_docling(pdf_path: str, pages: list[int]) -> list
             traverse_pictures=True,
             included_content_layers=set(ContentLayer),
         ):
+            # Suppress text-like items whose bbox is contained within an image or table region.
+            if _is_text_content(item) and container_bboxes:
+                ibbox = _provenance_bbox(item, page_no, height)
+                if ibbox is not None and any(
+                    _bbox_contained(ibbox, cb) for cb in container_bboxes
+                ):
+                    continue
+
             block = _docling_item_to_block(doc, item, page_no, height, reading_order + 1)
             if block is None:
                 continue
@@ -127,7 +148,39 @@ def _extract_missing_pages_with_docling(pdf_path: str, pages: list[int]) -> list
 
     return layouts
 
-pass_through_kind = ['picture','table','code']
+def _provenance_bbox(item: DocItem, page_no: int, page_height: float) -> tuple[float, float, float, float] | None:
+    prov = next(
+        (p for p in getattr(item, "prov", []) if p.page_no == page_no and p.bbox is not None),
+        None,
+    )
+    if prov is None:
+        return None
+    bbox = prov.bbox.to_top_left_origin(page_height)
+    x0, y0, x1, y1 = float(bbox.l), float(bbox.t), float(bbox.r), float(bbox.b)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return (x0, y0, x1, y1)
+
+
+def _bbox_contained(inner: tuple[float, float, float, float], outer: tuple[float, float, float, float], threshold: float = 0.8) -> bool:
+    """Return True when *inner* is mostly contained within *outer*."""
+    ix0, iy0, ix1, iy1 = inner
+    ox0, oy0, ox1, oy1 = outer
+    ox0, ox1 = max(ix0, ox0), min(ix1, ox1)
+    oy0, oy1 = max(iy0, oy0), min(iy1, oy1)
+    if ox0 >= ox1 or oy0 >= oy1:
+        return False
+    overlap = (ox1 - ox0) * (oy1 - oy0)
+    inner_area = (ix1 - ix0) * (iy1 - iy0)
+    return overlap / inner_area >= threshold if inner_area > 0 else False
+
+
+def _is_text_content(item: DocItem) -> bool:
+    """Items whose text should be suppressed when they lie inside a container region."""
+    return isinstance(item, (TextItem, ListItem, TitleItem, SectionHeaderItem, FormulaItem, CodeItem))
+
+
+pass_through_kind = ['picture','table','code','footnote','footer']
 
 def _docling_item_to_block(
     doc: DoclingDocument,
@@ -270,7 +323,7 @@ def _estimate_font_size(box_height: float, text: str, block_type: str) -> float:
 
 
 def _layout_cache_key(doc_id: str, page_no: int) -> str:
-    return f"{doc_id}:page:{page_no}:layout:v4-docling-types"
+    return f"{doc_id}:page:{page_no}:layout:v5-container-filter"
 
 
 def _load_page_sizes(pdf_path: str, pages: list[int]) -> dict[int, tuple[float, float]]:

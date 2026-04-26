@@ -88,12 +88,10 @@ const DEFAULT_AUTO_PREFETCH = true;
 const DEFAULT_FONT_SCALE = 1;
 
 export class DualTranslateReader {
-  private toolbarHandler:
-    | _ZoteroTypes.Reader.EventHandler<"renderToolbar">
-    | null = null;
-  private viewMenuHandler:
-    | _ZoteroTypes.Reader.EventHandler<"createViewContextMenu">
-    | null = null;
+  private toolbarHandler: _ZoteroTypes.Reader.EventHandler<"renderToolbar"> | null =
+    null;
+  private viewMenuHandler: _ZoteroTypes.Reader.EventHandler<"createViewContextMenu"> | null =
+    null;
   private states = new Map<_ZoteroTypes.ReaderInstance<"pdf">, ReaderState>();
 
   async startup() {
@@ -190,6 +188,22 @@ export class DualTranslateReader {
     });
   }
 
+  async ensureSecondaryFonts(doc: Document) {
+    if (doc.getElementById("zdt-secondary-fonts")) return;
+
+    const style = doc.createElement("style");
+    style.id = "zdt-secondary-fonts";
+    style.textContent = `
+      @font-face {
+        font-family: "PUHUI";
+        src: url("file:///Users/pauli/Downloads/AlibabaPuHuiTi-3/AlibabaPuHuiTi-3-55-Regular/AlibabaPuHuiTi-3-55-Regular.otf") format("opentype");
+        font-weight: 400;
+        font-style: normal;
+      }
+    `;
+    (doc.head || doc.documentElement || doc.body)?.appendChild(style);
+  }
+
   private async toggleMode(reader: _ZoteroTypes.ReaderInstance<"pdf">) {
     this.logReader(
       reader,
@@ -240,6 +254,7 @@ export class DualTranslateReader {
     if (!secondaryDoc || !secondaryApp) {
       throw new Error("Secondary reader view is not ready.");
     }
+    // await this.ensureSecondaryFonts(secondaryDoc);
     this.logReader(reader, "secondary view ready");
 
     this.ensureSecondaryStyles(secondaryDoc);
@@ -397,10 +412,7 @@ export class DualTranslateReader {
       state.secondaryApp.eventBus?.off?.("pagerendered", rerenderSecondary);
       state.secondaryApp.eventBus?.off?.("updateviewarea", rerenderSecondary);
       state.secondaryApp.eventBus?.off?.("scalechanging", rerenderSecondary);
-      state.secondaryApp.eventBus?.off?.(
-        "rotationchanging",
-        rerenderSecondary,
-      );
+      state.secondaryApp.eventBus?.off?.("rotationchanging", rerenderSecondary);
     });
 
     const pollTimer = state.primaryDoc.defaultView?.setInterval(() => {
@@ -871,7 +883,10 @@ export class DualTranslateReader {
     message: string,
     tone: "empty" | "warning" | "error",
   ) {
-    const pageNumber = Number.parseInt(pageElement.dataset.pageNumber || "", 10);
+    const pageNumber = Number.parseInt(
+      pageElement.dataset.pageNumber || "",
+      10,
+    );
     const overlay = this.ensurePageOverlay(pageElement, pageNumber);
     overlay.className = `zdt-page-overlay is-placeholder is-${tone}`;
     overlay.replaceChildren();
@@ -884,9 +899,12 @@ export class DualTranslateReader {
   }
 
   private ensurePageOverlay(pageElement: HTMLElement, pageNumber: number) {
-    let overlay = pageElement.querySelector<HTMLElement>(":scope > .zdt-page-overlay");
+    let overlay = pageElement.querySelector<HTMLElement>(
+      ":scope > .zdt-page-overlay",
+    );
     if (!overlay) {
-      const ownerDocument = pageElement.ownerDocument || this.getDocumentFromNode(pageElement);
+      const ownerDocument =
+        pageElement.ownerDocument || this.getDocumentFromNode(pageElement);
       overlay = ownerDocument.createElement("div");
       overlay.className = "zdt-page-overlay";
       pageElement.appendChild(overlay);
@@ -916,7 +934,8 @@ export class DualTranslateReader {
       ? view?.getComputedStyle(state.secondaryDoc.body)
       : null;
     const pageBackground =
-      pageStyles?.backgroundColor && pageStyles.backgroundColor !== "rgba(0, 0, 0, 0)"
+      pageStyles?.backgroundColor &&
+      pageStyles.backgroundColor !== "rgba(0, 0, 0, 0)"
         ? pageStyles.backgroundColor
         : bodyStyles?.backgroundColor || "#ffffff";
     const pageColor = bodyStyles?.color || pageStyles?.color || "#0f172a";
@@ -1196,7 +1215,9 @@ export class DualTranslateReader {
       return;
     }
     const active = this.states.has(reader);
-    for (const button of doc.querySelectorAll("[data-zdt-toolbar-button='1']")) {
+    for (const button of doc.querySelectorAll(
+      "[data-zdt-toolbar-button='1']",
+    )) {
       button.classList.toggle("is-active", active);
     }
   }
@@ -1342,7 +1363,9 @@ export class DualTranslateReader {
     }
 
     try {
-      if (secondaryViewer.currentScaleValue !== primaryViewer.currentScaleValue) {
+      if (
+        secondaryViewer.currentScaleValue !== primaryViewer.currentScaleValue
+      ) {
         secondaryViewer.currentScaleValue = primaryViewer.currentScaleValue;
       }
     } catch (error) {
@@ -1448,7 +1471,9 @@ export class DualTranslateReader {
     );
   }
 
-  private async waitForPrimaryReader(reader: _ZoteroTypes.ReaderInstance<"pdf">) {
+  private async waitForPrimaryReader(
+    reader: _ZoteroTypes.ReaderInstance<"pdf">,
+  ) {
     this.logReader(reader, "waitForPrimaryReader start");
     await reader._waitForReader?.();
     const primaryView = this.getPrimaryView(reader);
@@ -1573,10 +1598,16 @@ export class DualTranslateReader {
   private getBlockTypography(block: LayoutBlock, fontScale: number) {
     const layer = block.content_layer || "body";
     const type = block.type || "paragraph";
-    const fadedColor = layer === "furniture" ? "rgba(71, 85, 105, 0.8)" : "var(--zdt-ink, #0f172a)";
-    const titleFont = '"PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif';
-    const bodyFont = '"PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif';
-    const monoFont = '"SFMono-Regular", "SF Mono", "Menlo", "Consolas", monospace';
+    const fadedColor =
+      layer === "furniture"
+        ? "rgba(71, 85, 105, 0.8)"
+        : "var(--zdt-ink, #0f172a)";
+    const titleFont =
+      '"PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif';
+    const bodyFont =
+      '"sans-serif", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif';
+    const monoFont =
+      '"SFMono-Regular", "SF Mono", "Menlo", "Consolas", monospace';
 
     const presets: Record<
       string,
@@ -1727,8 +1758,7 @@ export class DualTranslateReader {
 
   private getDocumentFromNode(node: Node) {
     return (
-      (node.ownerDocument as Document | null) ||
-      (node as unknown as Document)
+      (node.ownerDocument as Document | null) || (node as unknown as Document)
     );
   }
 
@@ -1756,10 +1786,13 @@ export class DualTranslateReader {
     reader: _ZoteroTypes.ReaderInstance<"pdf">,
     message: string,
   ) {
-    const itemID = (reader as _ZoteroTypes.ReaderInstance<"pdf"> & {
-      itemID?: number;
-      _itemID?: number;
-    }).itemID ||
+    const itemID =
+      (
+        reader as _ZoteroTypes.ReaderInstance<"pdf"> & {
+          itemID?: number;
+          _itemID?: number;
+        }
+      ).itemID ||
       (reader as _ZoteroTypes.ReaderInstance<"pdf"> & { _itemID?: number })
         ._itemID ||
       "unknown";
