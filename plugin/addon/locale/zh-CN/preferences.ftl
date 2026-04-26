@@ -1,0 +1,9 @@
+pref-title = 双语对照翻译
+pref-enable =
+    .label = 开启沉浸式双语翻译
+pref-service-url = 服务地址
+pref-target-lang = 目标语言
+pref-radius = 邻近页范围
+pref-auto-prefetch =
+    .label = 阅读时自动预取邻近页面
+pref-help = { $name } Build { $version } { $time }

@@ -1,0 +1,14 @@
+plugin/node_modules
+
+plugin/.scaffold
+
+plugin/.vscode
+plugin/.idea
+plugin/.env.example
+
+.idea
+
+plugin_old
+
+.venv
+

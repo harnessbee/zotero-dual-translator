@@ -1,0 +1,9 @@
+pref-title = Dual Translate
+pref-enable =
+    .label = Enable immersive dual translate
+pref-service-url = Service URL
+pref-target-lang = Target language
+pref-radius = Nearby page radius
+pref-auto-prefetch =
+    .label = Automatically prefetch nearby pages while reading
+pref-help = { $name } Build { $version } { $time }

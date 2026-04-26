@@ -1,0 +1,1 @@
+from docling_core.types.doc import DoclingDocument

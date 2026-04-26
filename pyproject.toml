@@ -1,0 +1,12 @@
+[project]
+name = "dual-docling"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "docling>=2.91.0",
+    "fastapi>=0.136.1",
+    "httpx>=0.28.1",
+    "pymupdf>=1.27.2.3",
+    "uvicorn>=0.46.0",
+]
