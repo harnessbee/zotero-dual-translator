@@ -4,3 +4,4 @@ pref("targetLang", "zh-CN");
 pref("radius", 5);
 pref("autoPrefetch", true);
 pref("fontScale", "1.00");
+pref("lineSpacing", "1.00");

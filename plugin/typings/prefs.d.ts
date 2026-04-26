@@ -13,6 +13,7 @@ declare namespace _ZoteroTypes {
       "radius": number;
       "autoPrefetch": boolean;
       "fontScale": string;
+      "lineSpacing": string;
     };
   }
 }

@@ -37,6 +37,7 @@ type PrefSnapshot = {
   radius: number;
   autoPrefetch: boolean;
   fontScale: number;
+  lineSpacing: number;
 };
 
 type SplitRestoreState = {
@@ -56,6 +57,9 @@ type ReaderChrome = {
   fontDownButton: HTMLButtonElement;
   fontUpButton: HTMLButtonElement;
   fontValue: HTMLElement;
+  lineDownButton: HTMLButtonElement;
+  lineUpButton: HTMLButtonElement;
+  lineValue: HTMLElement;
   panelToggleButton: HTMLButtonElement;
 };
 
@@ -81,11 +85,33 @@ type ReaderState = {
   lastReason?: string | null;
 };
 
+type BlockTypography = {
+  fontSize: number;
+  fontWeight: number;
+  fontStyle: "normal" | "italic";
+  lineHeight: number;
+  letterSpacing: string;
+  color: string;
+  fontFamily: string;
+};
+
+type PageBlockMetrics = {
+  block: LayoutBlock;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  width: number;
+  height: number;
+  availableHeight: number;
+};
+
 const DEFAULT_SERVICE_URL = "http://127.0.0.1:8765";
 const DEFAULT_TARGET_LANG = "zh-CN";
 const DEFAULT_RADIUS = 1;
 const DEFAULT_AUTO_PREFETCH = true;
 const DEFAULT_FONT_SCALE = 1;
+const DEFAULT_LINE_SPACING = 1;
 
 export class DualTranslateReader {
   private toolbarHandler: _ZoteroTypes.Reader.EventHandler<"renderToolbar"> | null =
@@ -301,6 +327,12 @@ export class DualTranslateReader {
     });
     chrome.fontUpButton.addEventListener("click", () => {
       this.adjustFontScale(state, 0.05);
+    });
+    chrome.lineDownButton.addEventListener("click", () => {
+      this.adjustLineSpacing(state, -0.05);
+    });
+    chrome.lineUpButton.addEventListener("click", () => {
+      this.adjustLineSpacing(state, 0.05);
     });
     chrome.panelToggleButton.addEventListener("click", () => {
       state.panelCollapsed = !state.panelCollapsed;
@@ -675,6 +707,28 @@ export class DualTranslateReader {
 
     fontControls.append(fontLabel, fontDownButton, fontValue, fontUpButton);
 
+    const lineControls = doc.createElement("div");
+    lineControls.className = "zdt-line-controls";
+
+    const lineLabel = doc.createElement("span");
+    lineLabel.className = "zdt-line-label";
+    lineLabel.textContent = "Line";
+
+    const lineDownButton = doc.createElement("button");
+    lineDownButton.type = "button";
+    lineDownButton.className = "zdt-chip-button";
+    lineDownButton.textContent = "L-";
+
+    const lineValue = doc.createElement("span");
+    lineValue.className = "zdt-line-value";
+
+    const lineUpButton = doc.createElement("button");
+    lineUpButton.type = "button";
+    lineUpButton.className = "zdt-chip-button";
+    lineUpButton.textContent = "L+";
+
+    lineControls.append(lineLabel, lineDownButton, lineValue, lineUpButton);
+
     const actions = doc.createElement("div");
     actions.className = "zdt-floating-actions";
 
@@ -697,7 +751,7 @@ export class DualTranslateReader {
     const nearbyRail = doc.createElement("div");
     nearbyRail.className = "zdt-nearby-rail";
 
-    settings.append(fontControls);
+    settings.append(fontControls, lineControls);
     body.append(settings, actions, status, nearbyRail);
     host.append(header, body);
 
@@ -712,6 +766,9 @@ export class DualTranslateReader {
       fontDownButton,
       fontUpButton,
       fontValue,
+      lineDownButton,
+      lineUpButton,
+      lineValue,
       panelToggleButton,
     };
   }
@@ -721,6 +778,7 @@ export class DualTranslateReader {
     state.chrome.host.classList.toggle("is-collapsed", state.panelCollapsed);
     state.chrome.pageBadge.textContent = `Page ${state.currentPage}`;
     state.chrome.fontValue.textContent = `${Math.round(prefs.fontScale * 100)}%`;
+    state.chrome.lineValue.textContent = `${Math.round(prefs.lineSpacing * 100)}%`;
     state.chrome.panelToggleButton.textContent = state.panelCollapsed
       ? "Show"
       : "Hide";
@@ -824,32 +882,40 @@ export class DualTranslateReader {
     inner.className = "zdt-page-overlay-inner";
     inner.style.width = `${Math.max(1, layout.width)}px`;
     inner.style.height = `${Math.max(1, layout.height)}px`;
-    const maskLayer = state.secondaryDoc.createElement("div");
-    maskLayer.className = "zdt-mask-layer";
+    const visualLayer = state.secondaryDoc.createElement("div");
+    visualLayer.className = "zdt-visual-layer";
     const textLayer = state.secondaryDoc.createElement("div");
     textLayer.className = "zdt-text-layer";
 
     const prefs = this.readPrefs();
     const scale = this.measurePageScale(pageElement, layout);
     inner.style.transform = `scale(${scale})`;
+    inner.append(visualLayer, textLayer);
+    overlay.appendChild(inner);
 
-    for (const block of layout.blocks || []) {
+    for (const metrics of this.buildPageBlockMetrics(layout)) {
+      const { block } = metrics;
       const blockText = block.translated_text || block.text || "";
+      if (this.shouldRenderPassthroughVisual(block)) {
+        const visual = this.createPassthroughVisual(
+          state.secondaryDoc,
+          pageElement,
+          layout,
+          metrics,
+        );
+        if (visual) {
+          visualLayer.appendChild(visual);
+        }
+        continue;
+      }
       if (block.render_mode === "passthrough" || !blockText.trim()) {
         continue;
       }
-      const [x0, y0, x1, y1] = block.bbox || [0, 0, 0, 0];
-      const blockWidth = Math.max(8, Number(x1) - Number(x0));
-      const blockHeight = Math.max(8, Number(y1) - Number(y0));
-      const typography = this.getBlockTypography(block, prefs.fontScale);
-      const mask = state.secondaryDoc.createElement("div");
-      mask.className = "zdt-text-mask";
-      mask.style.left = `${Math.max(0, Number(x0) - 1)}px`;
-      mask.style.top = `${Math.max(0, Number(y0) - 1)}px`;
-      mask.style.width = `${Math.max(12, blockWidth + 2)}px`;
-      mask.style.minHeight = `${Math.max(10, blockHeight + 2)}px`;
-      maskLayer.appendChild(mask);
-
+      const typography = this.getBlockTypography(
+        block,
+        prefs.fontScale,
+        prefs.lineSpacing,
+      );
       const node = state.secondaryDoc.createElement("div");
       node.className = "zdt-text-block";
       node.dataset.blockType = block.type || "paragraph";
@@ -860,9 +926,9 @@ export class DualTranslateReader {
         node.dataset.contentKind = block.content_kind;
       }
       node.textContent = blockText;
-      node.style.left = `${Math.max(0, Number(x0))}px`;
-      node.style.top = `${Math.max(0, Number(y0))}px`;
-      node.style.width = `${Math.max(48, blockWidth)}px`;
+      node.style.left = `${Math.max(0, metrics.x0)}px`;
+      node.style.top = `${Math.max(0, metrics.y0)}px`;
+      node.style.width = `${Math.max(48, metrics.width)}px`;
       node.style.fontSize = `${typography.fontSize}px`;
       node.style.fontWeight = String(typography.fontWeight);
       node.style.fontStyle = typography.fontStyle;
@@ -871,10 +937,8 @@ export class DualTranslateReader {
       node.style.color = typography.color;
       node.style.fontFamily = typography.fontFamily;
       textLayer.appendChild(node);
+      this.fitTextBlock(node, metrics, typography);
     }
-
-    inner.append(maskLayer, textLayer);
-    overlay.appendChild(inner);
   }
 
   private renderPagePlaceholder(
@@ -959,6 +1023,188 @@ export class DualTranslateReader {
       return state.lastReason;
     }
     return `Loading translated page ${state.currentPage}...`;
+  }
+
+  private buildPageBlockMetrics(layout: PageLayout): PageBlockMetrics[] {
+    const metrics = (layout.blocks || []).map((block) => {
+      const [x0, y0, x1, y1] = block.bbox || [0, 0, 0, 0];
+      const left = Math.max(0, this.toFiniteNumber(x0));
+      const top = Math.max(0, this.toFiniteNumber(y0));
+      const right = Math.max(left + 1, this.toFiniteNumber(x1, left + 1));
+      const bottom = Math.max(top + 1, this.toFiniteNumber(y1, top + 1));
+      return {
+        block,
+        x0: left,
+        y0: top,
+        x1: right,
+        y1: bottom,
+        width: Math.max(8, right - left),
+        height: Math.max(8, bottom - top),
+        availableHeight: Math.max(8, bottom - top),
+      };
+    });
+
+    return metrics.map((metric, index) => ({
+      ...metric,
+      availableHeight: this.getAvailableBlockHeight(
+        metrics,
+        index,
+        Math.max(1, layout.height),
+      ),
+    }));
+  }
+
+  private getAvailableBlockHeight(
+    metrics: PageBlockMetrics[],
+    currentIndex: number,
+    pageHeight: number,
+  ) {
+    const current = metrics[currentIndex];
+    let bottomLimit = pageHeight;
+
+    for (let index = 0; index < metrics.length; index += 1) {
+      if (index === currentIndex) {
+        continue;
+      }
+      const candidate = metrics[index];
+      if (candidate.y0 <= current.y0 + 1) {
+        continue;
+      }
+      if (!this.blocksShareColumn(current, candidate)) {
+        continue;
+      }
+      bottomLimit = Math.min(bottomLimit, candidate.y0);
+    }
+
+    return Math.max(8, bottomLimit - current.y0 - 2);
+  }
+
+  private blocksShareColumn(
+    current: Pick<PageBlockMetrics, "x0" | "x1">,
+    candidate: Pick<PageBlockMetrics, "x0" | "x1">,
+  ) {
+    const overlapWidth =
+      Math.min(current.x1, candidate.x1) - Math.max(current.x0, candidate.x0);
+    const minWidth = Math.max(
+      1,
+      Math.min(current.x1 - current.x0, candidate.x1 - candidate.x0),
+    );
+    if (overlapWidth >= Math.min(24, minWidth * 0.2)) {
+      return true;
+    }
+
+    const currentCenter = (current.x0 + current.x1) / 2;
+    const candidateCenter = (candidate.x0 + candidate.x1) / 2;
+    return (
+      (currentCenter >= candidate.x0 - 16 &&
+        currentCenter <= candidate.x1 + 16) ||
+      (candidateCenter >= current.x0 - 16 &&
+        candidateCenter <= current.x1 + 16)
+    );
+  }
+
+  private fitTextBlock(
+    node: HTMLElement,
+    metrics: PageBlockMetrics,
+    typography: BlockTypography,
+  ) {
+    const maxHeight = Math.max(8, metrics.availableHeight);
+    const baseFontSize = typography.fontSize;
+    const minFontSize = Number(
+      Math.max(4.5, baseFontSize * 0.55).toFixed(2),
+    );
+
+    node.style.maxHeight = `${maxHeight}px`;
+    node.style.overflow = "hidden";
+
+    if (!this.textBlockFits(node, maxHeight)) {
+      const setFontSize = (size: number) => {
+        node.style.fontSize = `${Number(size.toFixed(2))}px`;
+      };
+
+      setFontSize(minFontSize);
+      if (this.textBlockFits(node, maxHeight)) {
+        let low = minFontSize;
+        let high = baseFontSize;
+        let best = minFontSize;
+        for (let step = 0; step < 8; step += 1) {
+          const mid = (low + high) / 2;
+          setFontSize(mid);
+          if (this.textBlockFits(node, maxHeight)) {
+            best = mid;
+            low = mid;
+          } else {
+            high = mid;
+          }
+        }
+        setFontSize(best);
+      }
+    }
+
+    const renderedHeight = Math.min(maxHeight, Math.max(1, node.scrollHeight));
+    node.style.minHeight = `${Math.max(metrics.height, renderedHeight)}px`;
+  }
+
+  private shouldRenderPassthroughVisual(block: LayoutBlock) {
+    return (
+      block.render_mode === "passthrough" &&
+      (block.content_kind === "picture" || block.content_kind === "table")
+    );
+  }
+
+  private createPassthroughVisual(
+    doc: Document,
+    pageElement: HTMLElement,
+    layout: PageLayout,
+    metrics: PageBlockMetrics,
+  ) {
+    const sourceCanvas = this.getPageCanvas(pageElement);
+    if (!sourceCanvas || sourceCanvas.width < 1 || sourceCanvas.height < 1) {
+      return null;
+    }
+
+    const scaleX = sourceCanvas.width / Math.max(1, layout.width);
+    const scaleY = sourceCanvas.height / Math.max(1, layout.height);
+    const sx = Math.max(0, Math.floor(metrics.x0 * scaleX));
+    const sy = Math.max(0, Math.floor(metrics.y0 * scaleY));
+    const sw = Math.min(
+      sourceCanvas.width - sx,
+      Math.max(1, Math.ceil(metrics.width * scaleX)),
+    );
+    const sh = Math.min(
+      sourceCanvas.height - sy,
+      Math.max(1, Math.ceil(metrics.height * scaleY)),
+    );
+    if (sw < 1 || sh < 1) {
+      return null;
+    }
+
+    const canvas = doc.createElement("canvas") as HTMLCanvasElement;
+    canvas.className = "zdt-passthrough-block";
+    canvas.style.left = `${Math.max(0, metrics.x0)}px`;
+    canvas.style.top = `${Math.max(0, metrics.y0)}px`;
+    canvas.style.width = `${Math.max(1, metrics.width)}px`;
+    canvas.style.height = `${Math.max(1, metrics.height)}px`;
+    canvas.width = sw;
+    canvas.height = sh;
+
+    const context = canvas.getContext("2d") as CanvasRenderingContext2D | null;
+    if (!context) {
+      return null;
+    }
+    context.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+    return canvas;
+  }
+
+  private getPageCanvas(pageElement: HTMLElement) {
+    return pageElement.querySelector("canvas") as HTMLCanvasElement | null;
+  }
+
+  private textBlockFits(node: HTMLElement, maxHeight: number) {
+    return (
+      node.scrollHeight <= maxHeight + 1 &&
+      node.scrollWidth <= node.clientWidth + 1
+    );
   }
 
   private ensurePrimaryStyles(doc: Document) {
@@ -1050,20 +1296,24 @@ export class DualTranslateReader {
       .zdt-floating-settings {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-start;
         gap: 10px;
+        flex-wrap: wrap;
       }
-      .zdt-font-controls {
+      .zdt-font-controls,
+      .zdt-line-controls {
         display: inline-flex;
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
       }
-      .zdt-font-label {
+      .zdt-font-label,
+      .zdt-line-label {
         color: #475569;
         font-weight: 600;
       }
-      .zdt-font-value {
+      .zdt-font-value,
+      .zdt-line-value {
         min-width: 42px;
         text-align: center;
         font-weight: 700;
@@ -1136,21 +1386,22 @@ export class DualTranslateReader {
         z-index: 12;
         overflow: hidden;
         pointer-events: none;
+        background: var(--zdt-paper, #ffffff);
         color: var(--zdt-ink, #0f172a);
       }
       .zdt-page-overlay-inner {
         position: relative;
         transform-origin: top left;
       }
-      .zdt-mask-layer,
+      .zdt-visual-layer,
       .zdt-text-layer {
         position: absolute;
         inset: 0;
       }
-      .zdt-text-mask {
+      .zdt-passthrough-block {
         position: absolute;
-        box-sizing: border-box;
-        background: var(--zdt-paper, rgba(255, 255, 255, 0.98));
+        display: block;
+        pointer-events: none;
       }
       .zdt-text-block {
         position: absolute;
@@ -1270,6 +1521,7 @@ export class DualTranslateReader {
         (getPref("autoPrefetch") as boolean | undefined) ??
         DEFAULT_AUTO_PREFETCH,
       fontScale: this.normalizeFontScale(getPref("fontScale")),
+      lineSpacing: this.normalizeLineSpacing(getPref("lineSpacing")),
     };
   }
 
@@ -1585,6 +1837,14 @@ export class DualTranslateReader {
     return Math.max(0.5, Math.min(1.5, Number(parsed.toFixed(2))));
   }
 
+  private normalizeLineSpacing(value: unknown) {
+    const parsed = Number.parseFloat(String(value));
+    if (!Number.isFinite(parsed)) {
+      return DEFAULT_LINE_SPACING;
+    }
+    return Math.max(0.8, Math.min(1.6, Number(parsed.toFixed(2))));
+  }
+
   private setStatus(state: ReaderState, text: string) {
     state.chrome.status.textContent = text;
   }
@@ -1595,7 +1855,11 @@ export class DualTranslateReader {
     });
   }
 
-  private getBlockTypography(block: LayoutBlock, fontScale: number) {
+  private getBlockTypography(
+    block: LayoutBlock,
+    fontScale: number,
+    lineSpacing: number,
+  ): BlockTypography {
     const layer = block.content_layer || "body";
     const type = block.type || "paragraph";
     const fadedColor =
@@ -1744,6 +2008,10 @@ export class DualTranslateReader {
     return {
       ...preset,
       fontSize: Math.max(8, Number((preset.fontSize * fontScale).toFixed(2))),
+      lineHeight: Math.max(
+        1,
+        Number((preset.lineHeight * lineSpacing).toFixed(2)),
+      ),
     };
   }
 
@@ -1754,6 +2022,20 @@ export class DualTranslateReader {
     this.logReader(state.reader, `fontScale=${next}`);
     this.renderChrome(state);
     this.renderSecondaryPages(state);
+  }
+
+  private adjustLineSpacing(state: ReaderState, delta: number) {
+    const current = this.readPrefs().lineSpacing;
+    const next = this.normalizeLineSpacing(current + delta);
+    setPref("lineSpacing", next.toFixed(2));
+    this.logReader(state.reader, `lineSpacing=${next}`);
+    this.renderChrome(state);
+    this.renderSecondaryPages(state);
+  }
+
+  private toFiniteNumber(value: unknown, fallback = 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
   private getDocumentFromNode(node: Node) {
